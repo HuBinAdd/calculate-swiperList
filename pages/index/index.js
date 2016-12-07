@@ -1,11 +1,17 @@
-const https = require('../../public/js/douban.js')
+const https = require('../../public/js/douban.js');
+
+if(!Object.assign) {
+  Object.assign = require('../../public/core/object-assign.js')
+}
 //index.js
 //获取应用实例
 var app = getApp()
 Page({
   data: {
+    uid:'',
+    userType:'xuechetiku',
+    isNewExam:true,//是否使用后台答案
     isLoading:false,//加载
-    isNoFirst:true,//当前页是否不是第一次做答
     swiper:{
       active:0
     },
@@ -13,6 +19,8 @@ Page({
       isLayerShow:false,//默认弹窗
       layerAnimation:{},//弹窗动画
     },
+    storeUrl:'?m=Exam&c=Server&a=collection',//收藏URL
+    answerUrl:'?m=Exam&c=Server&a=collection',//提交答案URL
     answers:{
       onLoadUrl:'?m=Exam&c=Server&a=getQuestionID',//题目号链接      
       start:0,//初始题号
@@ -26,74 +34,106 @@ Page({
   },
   //单选逻辑
   tapRadio:function(e){
-    var thisOption=e.currentTarget.dataset.option.split(",");
-    var list = this.data.answers.list[thisOption[2]].options.map(function(option,i){ 
-      if(thisOption[1] == i && option.class != 'active'){
-        option.Select = true;
-      }else{
-        option.Select = false;        
-      }
-      return option
-    });      
-    this.data.answers.list.options = list;
+    var thisOption=e.currentTarget.dataset.option.split(","),
+        list = this.data.answers.allLists[this.data.answers.activeNum].options.map(function(option,i){ 
+          if(thisOption[1] == option.tip){
+            if(!option.isActive){
+              option.isActive = true;
+              option.isSelect = true;       
+            }else{
+              option.isActive = false;
+              option.isSelect = false;
+            }
+          }
+          return option
+        });      
+    this.data.answers.allLists[this.data.answers.activeNum].options = list;
     this.tapSelect(e);
   },
   //多选逻辑
   tapCheckbox:function(e){
-    var thisOption=e.currentTarget.dataset.option.split(",");
-    var list = this.data.answers.list.options.map(function(option,i){      
-      if(thisOption[1] == i && option.class != 'active'){
-        option.class = 'active';
-        option.Select = true;
-      }else if(thisOption[1] == i){
-        option.class = '';
-        option.Select = false;        
-      }
-      return option
-    });
-    this.data.answers.list.options = list;
+    
+    if(this.data.answers.allLists[this.data.answers.activeNum].isNoFirst){
+      return false;
+    }
+
+    var thisOption=e.currentTarget.dataset.option.split(","),
+        list = this.data.answers.allLists[this.data.answers.activeNum].options.map(function(option,i){ 
+          if(thisOption[1] == option.tip){
+            if(!option.isActive){
+              option.isActive = true;
+              option.isSelect = true;       
+            }else{
+              option.isActive = false;
+              option.isSelect = false;
+            }
+          }
+          return option
+        });      
+    this.data.answers.allLists[this.data.answers.activeNum].options = list;
     this.setData(this.data);   
   },
   //答案判断逻辑
   tapSelect:function(e){
-    if(!this.data.isNoFirst || this.data.answers.allLists[this.data.answers.start+this.data.swiper.active].isAnswer){
+    if(this.data.answers.allLists[this.data.answers.activeNum].isNoFirst){
       return false;
     }    
     
-    this.data.isNoFirst = false;
-    var bool=true,data = this.data.answers.list[this.data.swiper.active].options.map(function(option,i){
-      if(option.Select && !option.correct){
-        option.class ='error';
+    var answered = 0,bool=true;
+    this.data.answers.allLists[this.data.answers.activeNum].options.forEach(function(option,i){
+      //解析答案数字编码
+      if(option.isSelect){
+        switch(option.tip){
+          case 'A':
+            answered = + 16;
+          break;
+          case 'B':
+            answered = + 32;
+          break;
+          case 'C':
+            answered = + 64;
+          break;
+          case 'D':
+            answered = + 128;
+          break;
+          default:
+          console.log('超出设定');
+        }
+      }
+      if(option.isSelect && !option.correct){
         bool=false;
       }
-      if(!option.Select && option.correct){
-        option.class = 'active-success';
+      if(!option.isSelect && option.correct){
         bool=false;
       }
-      if(option.Select && option.correct){
-        option.class = 'success';
-      }
-      return option
-    });
-    
+    });  
+    //存放本次答案数字编码
+    this.data.answers.allLists[this.data.answers.activeNum].answered = answered;
+    //存放本次答案选项
+    // this.data.answers.allLists[this.data.answers.activeNum].options = this.data.answers.list[this.data.swiper.active].options;
+    //改变题目状态为已答
+    this.data.answers.allLists[this.data.answers.activeNum].isNoFirst = true;
     if(bool){
-      this.data.answers.allLists[this.data.answers.start+this.data.swiper.active].isAnswer = 1;
+      this.data.answers.allLists[this.data.answers.activeNum].isAnswer = 1;
       this.data.answers.success++
     }else{
-      this.data.answers.allLists[this.data.answers.start+this.data.swiper.active].isAnswer = 2;      
+      this.data.answers.allLists[this.data.answers.activeNum].isAnswer = 2;      
       this.data.answers.error++
     }
 
-    this.data.answers.list.options = data;
     this.data.isShowTip = !bool;
     this.setData(this.data);
     //延迟加载滑动
     if(this.data.answers.activeNum + 1 < this.data.answers.allLists.length){
       setTimeout(() => this.onSwiper('left'),200);
-    }else{
-      // 结束了
-      console.log(111)
     }
+    //传答案
+    https.setAnswer(this.data.answerUrl,{
+      uid:'1217',
+      questionID:this.data.answers.allLists[this.data.answers.activeNum].id,
+      answer:this.data.answers.allLists[this.data.answers.activeNum].isAnswer,
+      choose:this.data.answers.allLists[this.data.answers.activeNum].answered
+    })
   },
   //页码切换列表效果
   pageClick:function(){
@@ -127,14 +167,26 @@ Page({
   },
   //收藏逻辑
   collectList:function(){
-    this.data.answers.list.isStore = !this.data.answers.list.isStore;
-    this.setData( this.data)
+    var isStore = 0 ;
+    this.data.answers.allLists[this.data.answers.activeNum].isStore = !this.data.answers.allLists[this.data.answers.activeNum].isStore;
+    this.setData( this.data);
+    isStore = this.data.answers.allLists[this.data.answers.activeNum].isStore? 1 : 0 ;
+    https.setStore(this.data.storeUrl,{
+      uid:'1217',
+      userType:'xuechetiku',
+      questionID:this.data.answers.allLists[this.data.answers.activeNum].id,
+      collection:isStore
+    }).then( data => {
+
+    })
+    .catch( e => {
+      this.callBackError(e.message);
+    });
   },
   //题号变更逻辑
   setActiveNum:function(e){
     var thisOption=e.currentTarget.dataset.option - 0;
     this.data.answers.activeNum = thisOption;
-    this.data.isNoFirst = false;  
     this.data.isLoading = false;  
     this.layerFooterClick();
     this.getSubject();
@@ -151,24 +203,25 @@ Page({
   },
   //swiper切换
   onSwiper:function(dire){
+    console.log(dire)
     var that = this,
         active = 0,
         storeSetTime,
         animationO = wx.createAnimation({
           transformOrigin: "50% 50%",
-          duration: 300,
+          duration: 200,
           timingFunction: "ease",
           delay: 0
         }),
         animationT = wx.createAnimation({
           transformOrigin: "50% 50%",
-          duration: 300,
+          duration: 200,
           timingFunction: "ease",
           delay: 0
         }),
         animationS = wx.createAnimation({
           transformOrigin: "50% 50%",
-          duration: 300,
+          duration: 200,
           timingFunction: "ease",
           delay: 0
         });
@@ -191,24 +244,22 @@ Page({
       if(dire == 'left'){
         animationT.translate3d('-100%',0,0).step();
         animationS.translate3d('0',0,0).step();
-        if(this.data.answers.activeNum < this.data.answers.end-1 ){
+        if(this.data.answers.activeNum < this.data.answers.end){
           active = 1;
         }else{
           this.$isLock = false;
           return;
         }
       }
-      this.data.isNoFirst =true;
       this.data.swiper.animationO = animationO.export();
       this.data.swiper.animationT = animationT.export();
       this.data.swiper.animationS = animationS.export();
       this.setData(this.data);
-      
-      this.data.swiper.active = this.data.swiper.active + active;
-      this.data.answers.activeNum = this.data.answers.activeNum + active;
+      console.log(this.data.answers.activeNum + 1)   
+      console.log(this.data.answers.allLists[this.data.answers.activeNum + 1].tip)   
       setTimeout(function(){ 
         that.setHtmlsetHtml(active);
-      },300);
+      },200);
     }
   },
   //修改页面至正常位置
@@ -234,17 +285,18 @@ Page({
       animationO.translate3d('-100%',0,0).step();
       animationT.translate3d('0',0,0).step();
       animationS.translate3d('100%',0,0).step();
-
+      this.data.swiper.active = this.data.swiper.active + active;
+      this.data.answers.activeNum = this.data.answers.activeNum + active;
       this.data.swiper.animationO = animationO;
       this.data.swiper.animationT = animationT;
       this.data.swiper.animationS = animationS;
+      console.log(this.data.answers.activeNum)   
+      console.log(this.data.answers.allLists[this.data.answers.activeNum].tip)   
       this.setData(this.data);
-
       //调用加载数据方法
-      if( (this.data.swiper.active == 2 && this.data.answers.start > 0) || (this.data.swiper.active+2 == this.data.answers.list.length && this.data.answers.end < this.data.answers.allLists.length)){
+      if( (this.data.swiper.active == 2 && this.data.answers.start > 0) || (this.data.swiper.active+2 == this.data.answers.list.length && this.data.answers.end+1 < this.data.answers.allLists.length)){
         this.getSubject();
       }
-
       //调用滑动结束回调
       if(this.isLockCall && typeof this.isLockCall == 'function'){
         this.isLockCall();
@@ -272,45 +324,61 @@ Page({
   },
   //切换题目逻辑
   getSubject:function(){
-    var that=this,start = this.data.answers.activeNum - this.data.answers.onceLoadLength,end = this.data.answers.activeNum + this.data.answers.onceLoadLength;
+    var that=this,start = this.data.answers.activeNum - this.data.answers.onceLoadLength,end = this.data.answers.activeNum + this.data.answers.onceLoadLength,params;
     start = start > 0 ? start : 0 ;
-    end = end > this.data.answers.allLists.length ? this.data.answers.allLists.length : end ;
-    this.data.answers.start = start;
-    this.data.answers.end = end;
-    
-    start = this.data.answers.allLists.slice(start,end);
-    start = start.map(function(data){
+    end = end+1 >= this.data.answers.allLists.length ? this.data.answers.allLists.length : end ;
+    //存放下次展示allallList数据
+    params = this.data.answers.allLists.slice(start,end+1);
+    //存放展示allallList数据ID
+    params = params.map(function(data){
       //后台需要int型
       return data.id-0
     });
-        
-    https.find(this.data.answers.url,{questionID:start})
+    https.find(this.data.answers.url,{questionID:params},this.data.isNewExam)
       .then(d => {
-
-          //注册滑动结束回调
+         //注册滑动结束回调
           if(this.$isLock){
-            this.isLockCall = function(){
-              this.data.swiper.active = this.data.answers.activeNum-this.data.answers.start;          
-              this.data.answers.list = d.data;
-              this.data.isLoading = false; 
-              this.data.isNoFirst = true; 
-              this.setData(this.data);
-            }
-          }else{
-            this.data.swiper.active = this.data.answers.activeNum-this.data.answers.start;          
-            this.data.answers.list = d.data;
-            this.data.isLoading = false; 
-            this.data.isNoFirst = true; 
-            this.setData(this.data);
+            this.isLockCall = ((d) => {
+                return this.callBackGetSubject(d,start,end);
+            })(d)
+          }else{  
+            this.callBackGetSubject(d,start,end);
           }
       })
       .catch(e => {
-        // this.setData({ subtitle: '获取数据异常', movies: [], loading: false })
-        // console.error(e)
+        this.callBackError(e.message);
       })
-  } ,
+  },
+  //详情数据加载的回调
+  callBackGetSubject:function(d,start,end){
+      d.data.forEach((data,i) => {
+        this.data.answers.allLists[start+ i] = Object.assign({},data,this.data.answers.allLists[start + i]);
+      })
+      this.data.answers.list = d.data;
+      this.data.isLoading = false;  
+      this.data.answers.list = d.data;   
+      this.data.answers.start = start;
+      this.data.answers.end = end;
+      this.data.swiper.active = this.data.answers.activeNum-this.data.answers.start;  
+      this.setData(this.data);      
+  },
+  //错误的回调
+  callBackError:function(e){
+      wx.showModal({
+        title: '错误',
+        content: '错误提示是：'+ e ,
+        showCancel:false,
+        confirmText:'确认关闭',
+        success: function(res) {
+          this.$isLock = false;
+          // if (res.confirm) {
+          //   console.log('用户点击确定')
+          // }
+        }
+      })
+  },
   onLoad (params) {
-      https.initialize(this.data.answers.onLoadUrl,{page:params.id,'option_type':2})
+      https.initialize(this.data.answers.onLoadUrl,{},this.data.isNewExam)
       .then(d => {
           this.data.answers.allLists = d.data;
           this.data.answers.success = d.success;
@@ -320,10 +388,12 @@ Page({
           this.getSubject();
       })
       .catch(e => {
-        
-          console.log(e)
+        this.callBackError(e.message);
         // this.setData({ subtitle: '获取数据异常', movies: [], loading: false })
         // console.error(e)
       });
   },
+  onUnload(){//页面卸载
+
+  }
 });

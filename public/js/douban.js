@@ -2,12 +2,41 @@ const API_URL = 'https://www.1217.com',
       Q = require('../core/Q.js');
 
 if(!Object.assign) {
-  Object.assign = require('../core/object-assign')
+  Object.assign = require('../core/object-assign.js')
 }
 
-function preProcessData(datas){
-  datas.data = datas.data.map(function(data){
-    var list = {},order=['a','b','c','d','e','f','g','h'],answer=[];
+//返回选项
+function getOption(num){
+  var answer=[];
+  if(num >= 128){//解析答案
+      answer.push('d');
+      num = num - 128; 
+    }
+
+    if(num >= 64){//解析答案
+      answer.push('c');
+      num = num - 64; 
+    }
+
+    if(num >= 32){//解析答案
+      answer.push('b');
+      num = num- 32; 
+    }
+
+    if(num == 16){//解析答案
+      answer.push('a');
+    }
+    return answer
+}
+function preProcessData(datas,isNewExam){
+  if(!datas.msg || datas.msg != "成功"){
+    //报错
+    throw new Error(data.data);
+  }
+
+  datas.data = datas.data.map(function(data,index){
+    
+    var list = {},order=['a','b','c','d','e','f','g','h'],answer=[],answered=[];
     switch (data.option_type){//解析题目类型
       case '0':
       list.type = '判断';
@@ -20,28 +49,11 @@ function preProcessData(datas){
       break;
     };
 
-    if(data.answer_ >= 128){//解析答案
-      answer.push('d');
-      data.answer_ =data.answer_ - 128; 
-    }
+    //返回正确答案
+    answer = getOption(data.answer_);
+    //返回已选择的答案
+    answered = getOption(128 || 0);
 
-    if(data.answer_ >= 64){//解析答案
-      answer.push('c');
-      data.answer_ =data.answer_ - 64; 
-    }
-
-    if(data.answer_ >= 32){//解析答案
-      answer.push('b');
-      data.answer_ =data.answer_ - 32; 
-    }
-
-    if(data.answer_ == 16){//解析答案
-      answer.push('a');
-    }
-    list.success = 334;//正确题数
-    list.error = 24;//错误题数
-    list.page = 358;//当前页码
-    list.total = 1000;//总页码
     list.isStore = false;//是否收藏
     list.tip = data.question_//试题详解
     list.isShowTip = false;//是否显示提示
@@ -53,11 +65,13 @@ function preProcessData(datas){
     list.content = data.question_;//问题正文
     list.options=[];
     //修正答案
+    
     order.every(function(v,i){
       var arr={};
       if(!!data['option_'+v] && data['option_'+v] !== "null"){      
         arr.tip = v.toUpperCase();
-        arr.correct= answer.indexOf(v) >= 0 ?1:0;
+        arr.correct= answer.indexOf(v) >= 0 ?1:0;//是否是正确答案
+        arr.isSelect = (answered.indexOf(v) >=0 && isNewExam) ? true : false; //是否已选择 
         arr.content = data['option_'+v];
         list.options.push(arr);
         return true;
@@ -70,7 +84,12 @@ function preProcessData(datas){
   return datas;
 }
 
-function preProcessInitData(data){
+function preProcessInitData(data,isNewExam){
+  if(!data.msg || data.msg != "成功"){
+    //报错
+    throw new Error(data.data);
+  }
+  
   var list = {};
   list.status = data.status;
   list.msg = data.msg;
@@ -80,11 +99,12 @@ function preProcessInitData(data){
   data.data.forEach(function(v,i){
     var a = {};
     a.id       =  v.question_id;//题目ID
-    a.isAnswer =  v.is_answer; //题目状态 0:未做，1：正确，2：错误
+    a.isAnswer =  2; //题目状态 0:未做，1：正确，2：错误
+    a.isNoFirst = (isNewExam && !!a.isAnswer);//当前题是否已答
     a.isStore =  v.is_store || false; //题目是否收藏
-    if(v.is_answer == 1){//对题
+    if(a.isAnswer == 1){//对题
       list.success++;
-    }else if(v.is_answer == 2){//错题
+    }else if(a.isAnswer == 2){//错题
       list.error++;
     }
     list.data.push(a);
@@ -92,13 +112,13 @@ function preProcessInitData(data){
   return list;
 }
 
-function fetchApi (type, params) {
+function fetchApi (type, params,method) {
   return Q.Promise(function(resolve, reject, notify) {
     wx.request({
       url: API_URL + '/' + type,
       data: params,
       header: { 'Content-Type': 'application/json' },
-      method:'GET',
+      method:method,
       success:resolve,
       fail: reject
     })
@@ -106,20 +126,31 @@ function fetchApi (type, params) {
 }
 
 module.exports = {
-  find (type, params) {
-    return fetchApi(type,params)
-      .then(res => preProcessData(res.data));
+  //获得数据
+  find (type,params,isNewExam) {
+    return fetchApi(type,params,'GET')
+      .then(res => preProcessData(res.data,isNewExam));
   },
-  initialize(type,params){
+  //获得题号
+  initialize(type,params,isNewExam){
     params = Object.assign({ 
-      subject   :  'kemu1',//科目类别 科1:kemu1,科目4:kemu3
-      type      :  'mnks' ,//题目分类
+      subject   :  'kemu3',//科目类别 科1:kemu1,科目4:kemu3
+      type      :  'dclx' ,//题目分类
       city      :  '杭州' ,//城市汉字名
       chapterID :   '1'      //章节ID
     },params);
-    return fetchApi(type,params)
-      .then(res => preProcessInitData(res.data));  
+    return fetchApi(type,params,'GET')
+      .then(res => preProcessInitData(res.data,isNewExam));  
+  },
+  //设置收藏
+  setStore(type,params){
+    return fetchApi(type,params,'GET');
+  },
+  //设置答案
+  setAnswer(type,params){
+    return fetchApi(type,params,'GET');    
   }
+
 }
 
 
